@@ -1,0 +1,293 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "projectAppName": {
+            "type": "string",
+            "metadata": {
+                "description": "Base name for alerts objects (name of the webapp for example)"
+            }
+        },
+
+        "projectAppShortName": {
+            "type": "string",
+            "metadata": {
+                "description": "Short base name for notification group (6 symbols)"
+            }
+        },
+
+        "gitAccessToken": {
+            "type": "string",
+            "metadata": {
+                "description": "Token for access to git repository with runbooks"
+            }
+        },
+
+        "gitBranch": {
+            "type": "string",
+            "metadata": {
+                "description": "Branch in the git repository"
+            }
+        },
+
+        "automationLogAnalyticsName": {
+            "type": "string",
+            "defaultValue": "[concat(parameters('projectAppName'),'-automation-logs')]",
+            "metadata": {
+                "description": "Name of Log Analytics Workspace"
+            }
+        },
+
+        "automationAccountName": {
+            "type": "string",
+            "defaultValue": "[concat(parameters('projectAppName'),'-automation')]",
+            "metadata": {
+                "description": "Name of Automation Account"
+            }
+        },
+
+        "storageAccountName": {
+            "type": "string",
+            "defaultValue": "[toLower(concat(parameters('projectAppName'),'autostor'))]",
+            "metadata": {
+                "description": "Name of the storage account"
+            }
+        },
+
+        "tagAuthor": {
+            "type": "string",
+            "defaultValue": "Andrey Krivtsov",
+            "metadata": {
+                "description": "value for tag Author"
+            }
+        },
+
+        "tagProject": {
+            "type": "string",
+            "defaultValue": "[parameters('projectAppName')]",
+            "metadata": {
+                "description": "value for tag Project"
+            }
+        },
+
+        "currentTime": {
+            "type": "string",
+            "defaultValue": "[utcNow('u')]"
+        }
+    },
+    "functions": [],
+    "variables": {
+        "scheduleStartTime": "[dateTimeAdd(parameters('currentTime'), 'PT1H')]"
+    },
+    "resources": [
+        {
+            "type": "microsoft.operationalinsights/workspaces",
+            "apiVersion": "2020-03-01-preview",
+            "name": "[parameters('automationLogAnalyticsName')]",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "Author": "[parameters('tagAuthor')]",
+                "Project": "[parameters('tagProject')]"
+            },
+            "properties": {
+                "sku": {
+                    "name": "PerGB2018"
+                },
+                "retentionInDays": 30,
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts",
+            "apiVersion": "2015-10-31",
+            "name": "[parameters('automationAccountName')]",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "Author": "[parameters('tagAuthor')]",
+                "Project": "[parameters('tagProject')]"
+            },
+            "properties": {
+                "sku": {
+                    "name": "Basic"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts/providers/diagnosticSettings",
+            "apiVersion": "2017-05-01-preview",
+            "name": "[concat(parameters('automationAccountName'),'/microsoft.insights/automationLogsSettings')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]",
+                "[resourceId('microsoft.operationalinsights/workspaces', parameters('automationLogAnalyticsName'))]"
+            ],
+
+            "properties": {
+                "workspaceId": "[resourceId('microsoft.operationalinsights/workspaces',parameters('automationLogAnalyticsName'))]",
+                "logs": [
+                    {
+                        "category": "JobLogs",
+                        "enabled": true
+                    },
+                    {
+                        "category": "JobStreams",
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts/schedules",
+            "apiVersion": "2015-10-31",
+            "name": "[concat(parameters('automationAccountName'), '/EveryDay-23-00')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "startTime": "[variables('scheduleStartTime')]",
+                "expiryTime": "9999-12-31T23:59:59+03:00",
+                "interval": 1,
+                "frequency": "Day",
+                "timeZone": "Europe/Moscow"
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts/schedules",
+            "apiVersion": "2015-10-31",
+            "name": "[concat(parameters('automationAccountName'), '/EverySunday')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "startTime": "[variables('scheduleStartTime')]",
+                "expiryTime": "9999-12-31T23:59:59+03:00",
+                "interval": 1,
+                "frequency": "Week",
+                "timeZone": "Europe/Moscow"
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts/modules",
+            "apiVersion": "2015-10-31",
+            "name": "[concat(parameters('automationAccountName'), '/Posh-ACME')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "contentLink": {
+                    "uri":"https://github.com/andy-krivtsov/le-webapp/raw/master/Assets/Posh-ACME.zip"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts/runbooks",
+            "apiVersion": "2018-06-30",
+            "name": "[concat(parameters('automationAccountName'), '/AzureAutomation-Account-Modules-Update')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "runbookType": "PowerShell",
+                "logVerbose": true,
+                "logProgress": false,
+                "publishContentLink": {
+                    "uri":"https://github.com/microsoft/AzureAutomation-Account-Modules-Update/raw/master/Update-AutomationAzureModulesForAccount.ps1"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Automation/automationAccounts/sourceControls",
+            "apiVersion": "2017-05-15-preview",
+            "name": "[concat(parameters('automationAccountName'), '/GitHub')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "repoUrl": "https://github.com/andy-krivtsov/le-webapp.git",
+                "sourceType": "GitHub",
+                "branch": "[parameters('gitBranch')]",
+                "folderPath": "/AppRunbooks",
+                "autoSync": true,
+                "publishRunbook": true,
+                "securityToken" : {
+                    "tokenType": "PersonalAccessToken",
+                    "accessToken": "[parameters('gitAccessToken')]"
+                }
+            }
+        },
+
+        {
+            "type": "Microsoft.Automation/automationAccounts/variables",
+            "name": "[concat(parameters('automationAccountName'), '/LECertUpdateConfiguration')]",
+            "apiVersion": "2015-10-31",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "value": "",
+                "description": "Let's encrypt update script configuration",
+                "isEncrypted": false
+            }
+        },
+
+        {
+            "type": "Microsoft.Automation/automationAccounts/variables",
+            "name": "[concat(parameters('automationAccountName'), '/LECertUpdatePfxPassword')]",
+            "apiVersion": "2015-10-31",
+            "dependsOn": [
+                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+                "value": "",
+                "description": "Lets Encrypt cert update script PFX file password",
+                "isEncrypted": true
+            }
+        },
+
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2019-06-01",
+            "name": "[parameters('storageAccountName')]",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "Author": "[parameters('tagAuthor')]",
+                "Project": "[parameters('tagProject')]"
+            },
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "largeFileSharesState": "Disabled",
+                "supportsHttpsTrafficOnly": true,
+                "accessTier": "Hot"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2019-06-01",
+            "name": "[concat(parameters('storageAccountName'), '/default/le-public')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "publicAccess": "Blob"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2019-06-01",
+            "name": "[concat(parameters('storageAccountName'), '/default/le-state')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        }
+
+    ],
+    "outputs": {}
+}
