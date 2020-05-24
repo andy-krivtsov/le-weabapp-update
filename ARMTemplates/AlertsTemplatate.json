@@ -34,7 +34,7 @@
     "variables": {
         "actionGroupName": "[concat(parameters('projectAppName'),'-Notify-Group')]",
         "actionGroupShortName": "[concat(parameters('projectAppShortName'),'Notify')]",
-        "logAnalyticsResource": "[resourceId('microsoft.operationalinsights/workspaces', parameters('automationLogAnalyticsName'))]",
+        "logAnalyticsResource": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('automationLogAnalyticsName'))]",
         "actionGroupResource": "[resourceId('microsoft.insights/actionGroups', variables('actionGroupName'))]"
     },
     "resources": [
@@ -61,7 +61,7 @@
             "type": "Microsoft.Insights/scheduledQueryRules",
             "apiVersion": "2018-04-16",  
             "name": "[concat(parameters('projectAppName'),'-certificate-require-update')]",
-            "location": "westeurope",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[variables('actionGroupResource')]"
             ],
@@ -97,7 +97,7 @@
             "type": "Microsoft.Insights/scheduledQueryRules",
             "apiVersion": "2018-04-16",
             "name": "[concat(parameters('projectAppName'),'-certificate-ok')]",
-            "location": "westeurope",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[variables('actionGroupResource')]"
             ],
@@ -134,7 +134,7 @@
             "type": "Microsoft.Insights/scheduledQueryRules",
             "apiVersion": "2018-04-16",
             "name": "[concat(parameters('projectAppName'),'-certificate-updated')]",
-            "location": "westeurope",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[variables('actionGroupResource')]"
             ],
@@ -171,7 +171,7 @@
             "type": "Microsoft.Insights/scheduledQueryRules",
             "apiVersion": "2018-04-16",
             "name": "[concat(parameters('projectAppName'),'-certificate-does-not-require-update')]",
-            "location": "westeurope",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[variables('actionGroupResource')]"
             ],
@@ -208,7 +208,7 @@
             "type": "Microsoft.Insights/scheduledQueryRules",
             "apiVersion": "2018-04-16",
             "name": "[concat(parameters('projectAppName'),'-errors-in-the-certificate-updating')]",
-            "location": "westeurope",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[variables('actionGroupResource')]"
             ],
