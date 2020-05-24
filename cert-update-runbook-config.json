@@ -1,0 +1,19 @@
+{
+    "StorageAccount": "storageacc",
+    "StorageContainer": "le-state",
+    "TokenContainer": "le-public",
+    "TenantId": "GUID",
+    "SubscriptionId": "GUID",
+    "DomainNames": [
+        "app.domain.com",
+        "rc.domain.com",
+        "dev.domain.com"
+    ],
+    "DomainContact": "postmaster@domain.com",
+    "WebAppNames": [
+        "testapp"
+    ],
+    "WebAppRG": "AppRG",
+    "LEServer": "LE_STAGE",
+    "IsDryRun": true
+}
