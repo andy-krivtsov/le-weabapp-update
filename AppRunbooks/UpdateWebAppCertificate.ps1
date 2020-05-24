@@ -15,7 +15,6 @@ import-module Posh-ACME
 
 $localAppData = Get-Content Env:\LOCALAPPDATA
 $StatePath = "$localAppData\Posh-ACME\"
-$ZIPFileName = 'posh-acme-state.zip'
 
 $CertExpirationBoundary = 20
 ########################################################################################################
@@ -83,6 +82,10 @@ function New-ACMECertificate
     do {
         $auths = $order | Get-PAAuthorizations
 
+        if($auths | ?{$_.HTTP01Status -eq "invalid"}){
+            throw "New-ACMECertificate: can't validate domains!"
+        }
+
         if( -not ($auths | ?{$_.HTTP01Status -ne "valid"}) ){
             break;
         }
@@ -143,31 +146,35 @@ function Set-AppServiceCertificate
 
         $logMsgBase = "Set-AppServiceCertificate: Update SSL binding. WebApp: $($webApp.Name)"
 
-        foreach($bind in ($webApp | Get-AzureRmWebAppSSLBinding) ){
-            $logMsg = $logMsgBase + ", slot: Production, binding: $($bind.Name)"
-
-            if(-not $IsDryRun){
-                $webApp | New-AzureRmWebAppSSLBinding -CertificateFilePath $cert.PfxFile -CertificatePassword $PfxPassword -Name $bind.Name -SslState $bind.SslState -Verbose | Out-Null
-                Write-VerboseLog $logMsg
-            }else{
-                Write-VerboseLog ($logMsg + "  (DRY RUN)")
-            }
-        }
-
-        foreach($slot in ($webApp | Get-AzureRmWebAppSlot) ){
-            foreach($bind in ($slot | Get-AzureRmWebAppSSLBinding) ){
-                $logMsg = $logMsgBase + ", slot: $($slot.Name), binding: $($bind.Name)"
+        foreach($bind in $webApp.HostNameSslStates){
+            if($DomainNames -contains $bind.Name){
+                $logMsg = $logMsgBase + ", slot: Production, binding: $($bind.Name)"
 
                 if(-not $IsDryRun){
-                    $slot | New-AzureRmWebAppSSLBinding -CertificateFilePath $cert.PfxFile -CertificatePassword $PfxPassword -Name $bind.Name -SslState $bind.SslState -Verbose | Out-Null
+                    $webApp | New-AzureRmWebAppSSLBinding -CertificateFilePath $cert.PfxFile -CertificatePassword $PfxPassword -Name $bind.Name -SslState "SniEnabled" -Verbose | Out-Null
                     Write-VerboseLog $logMsg
                 }else{
                     Write-VerboseLog ($logMsg + "  (DRY RUN)")
                 }
             }
+        }
+
+        foreach($slot in ($webApp | Get-AzureRmWebAppSlot) ){
+            foreach($bind in $slot.HostNameSslStates){
+                if($DomainNames -contains $bind.Name){
+                    $logMsg = $logMsgBase + ", slot: $($slot.Name), binding: $($bind.Name)"
+
+                    if(-not $IsDryRun){
+                        $slot | New-AzureRmWebAppSSLBinding -CertificateFilePath $cert.PfxFile -CertificatePassword $PfxPassword -Name $bind.Name -SslState $bind.SslState -Verbose | Out-Null
+                        Write-VerboseLog $logMsg
+                    }else{
+                        Write-VerboseLog ($logMsg + "  (DRY RUN)")
+                    }
+                }
+            }
         }        
 
-        Write-VerboseLog "Set-AppServiceCertificate: new certificate has been installed for WebApp: $webApp"
+        Write-VerboseLog "Set-AppServiceCertificate: new certificate has been installed for WebApp: $($webApp.Name)"
     }
 
     Write-VerboseLog "Set-AppServiceCertificate: New certificate has been installed to all WebApps: $($WebAppNames -join ',')"
@@ -178,7 +185,7 @@ function Test-WebAppCertificate{
         $webApp = Get-AzureRmWebApp -ResourceGroupName $WebAppRG -Name $wname
 
         foreach($bind in ($webApp | Get-AzureRmWebAppSSLBinding) ){
-            $cert = Get-AzureRmWebAppCertificate -ResourceGroupName $WebAppRG -Thumbprint $bind.Thumbprint
+            $cert = Get-AzureRmWebAppCertificate -Thumbprint $bind.Thumbprint
             
             $remainingDays = ($cert.ExpirationDate - (Get-Date)).Days
 
@@ -266,6 +273,8 @@ function Get-Configuration
     $Global:WebAppNames = $confData.WebAppNames
     $Global:WebAppRG = $confData.WebAppRG 
 
+    $Global:StateFileSuffix = $confData.StateFileSuffix
+
     $Global:LEServer = $confData.LEServer
     $Global:IsDryRun = $confData.IsDryRun
 
@@ -292,8 +301,10 @@ if($ScriptAction -eq 'CertVerify'){
 
 Write-VerboseLog "Certificate script: weekly update WebApp certificate run!"
 
+$ZIPFileName = "posh-acme-state-$StateFileSuffix.zip"
+
 if($LEServer -eq 'LE_STAGE'){
-    $ZIPFileName = 'posh-acme-state-stage.zip'
+    $ZIPFileName = "posh-acme-state-stage-$StateFileSuffix.zip"
 }
 
 Write-VerboseLog -Message "Certificate script: configuration: LEServer: $LEServer, IsDryRun: $IsDryRun"

@@ -14,6 +14,7 @@
         "testapp"
     ],
     "WebAppRG": "AppRG",
+    "StateFileSuffix" : "appname",
     "LEServer": "LE_STAGE",
     "IsDryRun": true
 }

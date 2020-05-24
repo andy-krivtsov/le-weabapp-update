@@ -24,3 +24,13 @@ Use release branches (not master)
 Deploy tempalte with Alertss
 
 
+# Check this after deployment template
+1. Runbooks
+2. PowerShell module import
+3. Schedules
+4. Diagnostics export settings
+4. RunAs Account (create manually)
+5. Source Control sync (manually after create account)
+
+
+
