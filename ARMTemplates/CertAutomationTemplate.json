@@ -23,6 +23,14 @@
             }
         },
 
+        "logWebAppName": {
+            "type": "string",
+            "defaultValue": "[parameters('projectAppName')]",
+            "metadata": {
+                "description": "Name of the webapp in the log messages (default == projectAppName)"
+            }
+        },
+
         "gitBranch": {
             "type": "string",
             "metadata": {
@@ -77,7 +85,16 @@
     },
     "functions": [],
     "variables": {
-        "scheduleStartTime": "[dateTimeAdd(parameters('currentTime'), 'PT1H')]"
+        "scheduleStartTime": "[dateTimeAdd(parameters('currentTime'), 'PT1H')]",
+        "AzureRMWebsitesModule": "AzureRM.Websites",
+        "PoshACMEModule": "Posh-ACME",
+
+        "logAnalyticsResource": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('automationLogAnalyticsName'))]",
+        "automationResource" : "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]",
+
+        "actionGroupName": "[concat(parameters('projectAppName'),'-Notify-Group')]",
+        "actionGroupShortName": "[concat(parameters('projectAppShortName'),'Notify')]",        
+        "actionGroupResource": "[resourceId('microsoft.insights/actionGroups', variables('actionGroupName'))]"
     },
     "resources": [
         {
@@ -103,27 +120,125 @@
             "apiVersion": "2015-10-31",
             "name": "[parameters('automationAccountName')]",
             "location": "[resourceGroup().location]",
+            
             "tags": {
                 "Author": "[parameters('tagAuthor')]",
                 "Project": "[parameters('tagProject')]"
             },
+            
             "properties": {
                 "sku": {
                     "name": "Basic"
                 }
-            }
+            },
+
+            "resources": [
+                {
+                    "type": "schedules",
+                    "apiVersion": "2015-10-31",
+                    "name": "EveryDay-23-00",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "startTime": "[variables('scheduleStartTime')]",
+                        "expiryTime": "9999-12-31T23:59:59+03:00",
+                        "interval": 1,
+                        "frequency": "Day",
+                        "timeZone": "Europe/Moscow"
+                    }
+                },
+
+                {
+                    "type": "schedules",
+                    "apiVersion": "2015-10-31",
+                    "name": "EverySunday",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "startTime": "[variables('scheduleStartTime')]",
+                        "expiryTime": "9999-12-31T23:59:59+03:00",
+                        "interval": 1,
+                        "frequency": "Week",
+                        "timeZone": "Europe/Moscow"
+                    }
+                },
+
+                {
+                    "type": "modules",
+                    "apiVersion": "2015-10-31",
+                    "name": "[variables('PoshACMEModule')]",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "contentLink": {
+                            "uri": "[concat('https://www.powershellgallery.com/api/v2/package/', variables('PoshACMEModule'))]"
+                        }
+                    }
+                },
+                {
+                    "type": "runbooks",
+                    "apiVersion": "2018-06-30",
+                    "name": "AzureAutomation-Account-Modules-Update",
+                    "location": "[resourceGroup().location]",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "runbookType": "PowerShell",
+                        "logVerbose": true,
+                        "logProgress": false,
+                        "publishContentLink": {
+                            "uri":"https://github.com/microsoft/AzureAutomation-Account-Modules-Update/raw/master/Update-AutomationAzureModulesForAccount.ps1"
+                        }
+                    }
+                },
+                {
+                    "type": "sourceControls",
+                    "apiVersion": "2017-05-15-preview",
+                    "name": "GitHub",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "repoUrl": "https://github.com/andy-krivtsov/le-webapp.git",
+                        "sourceType": "GitHub",
+                        "branch": "[parameters('gitBranch')]",
+                        "folderPath": "/AppRunbooks",
+                        "autoSync": true,
+                        "publishRunbook": true,
+                        "securityToken" : {
+                            "tokenType": "PersonalAccessToken",
+                            "accessToken": "[parameters('gitAccessToken')]"
+                        }
+                    }
+                },
+                {
+                    "type": "variables",
+                    "name": "LECertUpdateConfiguration",
+                    "apiVersion": "2015-10-31",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "value": "",
+                        "description": "Let's encrypt update script configuration",
+                        "isEncrypted": false
+                    }
+                },
+                {
+                    "type": "variables",
+                    "name": "LECertUpdatePfxPassword",
+                    "apiVersion": "2015-10-31",
+                    "dependsOn" : [ "[parameters('automationAccountName')]" ],
+                    "properties": {
+                        "value": "",
+                        "description": "Lets Encrypt cert update script PFX file password",
+                        "isEncrypted": true
+                    }
+                }
+            ]            
         },
         {
             "type": "Microsoft.Automation/automationAccounts/providers/diagnosticSettings",
             "apiVersion": "2017-05-01-preview",
             "name": "[concat(parameters('automationAccountName'),'/microsoft.insights/automationLogsSettings')]",
             "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]",
-                "[resourceId('microsoft.operationalinsights/workspaces', parameters('automationLogAnalyticsName'))]"
+                "[variables('automationResource')]",
+                "[variables('logAnalyticsResource')]"
             ],
-
             "properties": {
-                "workspaceId": "[resourceId('microsoft.operationalinsights/workspaces',parameters('automationLogAnalyticsName'))]",
+                "workspaceId": "[variables('logAnalyticsResource')]",
                 "logs": [
                     {
                         "category": "JobLogs",
@@ -136,115 +251,6 @@
                 ]
             }
         },
-        {
-            "type": "Microsoft.Automation/automationAccounts/schedules",
-            "apiVersion": "2015-10-31",
-            "name": "[concat(parameters('automationAccountName'), '/EveryDay-23-00')]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "startTime": "[variables('scheduleStartTime')]",
-                "expiryTime": "9999-12-31T23:59:59+03:00",
-                "interval": 1,
-                "frequency": "Day",
-                "timeZone": "Europe/Moscow"
-            }
-        },
-        {
-            "type": "Microsoft.Automation/automationAccounts/schedules",
-            "apiVersion": "2015-10-31",
-            "name": "[concat(parameters('automationAccountName'), '/EverySunday')]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "startTime": "[variables('scheduleStartTime')]",
-                "expiryTime": "9999-12-31T23:59:59+03:00",
-                "interval": 1,
-                "frequency": "Week",
-                "timeZone": "Europe/Moscow"
-            }
-        },
-        {
-            "type": "Microsoft.Automation/automationAccounts/modules",
-            "apiVersion": "2015-10-31",
-            "name": "[concat(parameters('automationAccountName'), '/Posh-ACME')]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "contentLink": {
-                    "uri":"https://github.com/andy-krivtsov/le-webapp/raw/master/Assets/Posh-ACME.zip"
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Automation/automationAccounts/runbooks",
-            "apiVersion": "2018-06-30",
-            "name": "[concat(parameters('automationAccountName'), '/AzureAutomation-Account-Modules-Update')]",
-            "location": "[resourceGroup().location]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "runbookType": "PowerShell",
-                "logVerbose": true,
-                "logProgress": false,
-                "publishContentLink": {
-                    "uri":"https://github.com/microsoft/AzureAutomation-Account-Modules-Update/raw/master/Update-AutomationAzureModulesForAccount.ps1"
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Automation/automationAccounts/sourceControls",
-            "apiVersion": "2017-05-15-preview",
-            "name": "[concat(parameters('automationAccountName'), '/GitHub')]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "repoUrl": "https://github.com/andy-krivtsov/le-webapp.git",
-                "sourceType": "GitHub",
-                "branch": "[parameters('gitBranch')]",
-                "folderPath": "/AppRunbooks",
-                "autoSync": true,
-                "publishRunbook": true,
-                "securityToken" : {
-                    "tokenType": "PersonalAccessToken",
-                    "accessToken": "[parameters('gitAccessToken')]"
-                }
-            }
-        },
-
-        {
-            "type": "Microsoft.Automation/automationAccounts/variables",
-            "name": "[concat(parameters('automationAccountName'), '/LECertUpdateConfiguration')]",
-            "apiVersion": "2015-10-31",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "value": "",
-                "description": "Let's encrypt update script configuration",
-                "isEncrypted": false
-            }
-        },
-
-        {
-            "type": "Microsoft.Automation/automationAccounts/variables",
-            "name": "[concat(parameters('automationAccountName'), '/LECertUpdatePfxPassword')]",
-            "apiVersion": "2015-10-31",
-            "dependsOn": [
-                "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
-            ],
-            "properties": {
-                "value": "",
-                "description": "Lets Encrypt cert update script PFX file password",
-                "isEncrypted": true
-            }
-        },
-
         {
             "type": "Microsoft.Storage/storageAccounts",
             "apiVersion": "2019-06-01",
@@ -263,28 +269,237 @@
                 "largeFileSharesState": "Disabled",
                 "supportsHttpsTrafficOnly": true,
                 "accessTier": "Hot"
+            },
+            "resources": [
+                {
+                    "type": "blobServices/containers",
+                    "apiVersion": "2019-06-01",
+                    "name": "/default/le-public",
+                    "dependsOn" : [ "[parameters('storageAccountName')]" ],
+                    "properties": {
+                        "publicAccess": "Blob"
+                    }
+                },
+                {
+                    "type": "blobServices/containers",
+                    "apiVersion": "2019-06-01",
+                    "name": "default/le-state",
+                    "dependsOn" : [ "[parameters('storageAccountName')]" ],
+                    "properties": {
+                        "publicAccess": "None"
+                    }
+                }
+            ]
+        },
+
+        {
+            "type": "Microsoft.Insights/actionGroups",
+            "apiVersion": "2019-03-01",
+            "name": "[variables('actionGroupName')]",
+            "location": "Global",
+            "properties": {
+                "groupShortName": "[variables('actionGroupShortName')]",
+                "enabled": true,
+                "emailReceivers": [],
+                "smsReceivers": [],
+                "webhookReceivers": [],
+                "itsmReceivers": [],
+                "azureAppPushReceivers": [],
+                "automationRunbookReceivers": [],
+                "voiceReceivers": [],
+                "logicAppReceivers": [],
+                "azureFunctionReceivers": []
+            }
+        },
+
+        {
+            "type": "Microsoft.Insights/scheduledQueryRules",
+            "apiVersion": "2018-04-16",  
+            "name": "[concat(parameters('projectAppName'),'-certificate-require-update')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('actionGroupResource')]",
+                "[variables('logAnalyticsResource')]"
+            ],
+            "properties": {
+                "description": "Certificate for WebApp expired in less than 20 days (daily checks)",
+                "enabled": "true",
+                "source": {
+                    "query": "[concat( 'AzureDiagnostics | where ResultDescription contains \"Test-WebAppCertificate: SSL certificate needs to be updated. WebApp: ', parameters('logWebAppName'), '\"')]",
+                    "authorizedResources": [],
+                    "dataSourceId": "[variables('logAnalyticsResource')]",
+                    "queryType": "ResultCount"
+                },
+                "schedule": {
+                    "frequencyInMinutes": 180,
+                    "timeWindowInMinutes": 180
+                },
+                "action": {
+                    "severity": "1",
+                    "aznsAction": {
+                        "actionGroup": [
+                            "[variables('actionGroupResource')]"
+                        ]
+                    },
+                    "trigger": {
+                        "thresholdOperator": "GreaterThan",
+                        "threshold": 0
+                    },
+                    "odata.type": "Microsoft.WindowsAzure.Management.Monitoring.Alerts.Models.Microsoft.AppInsights.Nexus.DataContracts.Resources.ScheduledQueryRules.AlertingAction"
+                }
+            }
+        },
+
+        {
+            "type": "Microsoft.Insights/scheduledQueryRules",
+            "apiVersion": "2018-04-16",
+            "name": "[concat(parameters('projectAppName'),'-certificate-ok')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('actionGroupResource')]",
+                "[variables('logAnalyticsResource')]"
+            ],
+            "properties": {
+                "description": "Certificate for WebApp is OK (daily checks)",
+                "enabled": "true",
+                "source": {
+                    "query": "[concat( 'AzureDiagnostics | where ResultDescription contains \"Test-WebAppCertificate: SSL certificate is OK! WebApp: ', parameters('logWebAppName'), '\"')]",
+                    "authorizedResources": [],
+                    "dataSourceId": "[variables('logAnalyticsResource')]",
+                    "queryType": "ResultCount"
+                },
+                "schedule": {
+                    "frequencyInMinutes": 15,
+                    "timeWindowInMinutes": 15
+                },
+                "action": {
+                    "severity": "2",
+                    "aznsAction": {
+                        "actionGroup": [
+                            "[variables('actionGroupResource')]"
+                        ]
+                    },
+                    "throttlingInMin": 60,
+                    "trigger": {
+                        "thresholdOperator": "GreaterThan",
+                        "threshold": 0
+                    },
+                    "odata.type": "Microsoft.WindowsAzure.Management.Monitoring.Alerts.Models.Microsoft.AppInsights.Nexus.DataContracts.Resources.ScheduledQueryRules.AlertingAction"
+                }
             }
         },
         {
-            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
-            "apiVersion": "2019-06-01",
-            "name": "[concat(parameters('storageAccountName'), '/default/le-public')]",
+            "type": "Microsoft.Insights/scheduledQueryRules",
+            "apiVersion": "2018-04-16",
+            "name": "[concat(parameters('projectAppName'),'-certificate-updated')]",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+                "[variables('actionGroupResource')]",
+                "[variables('logAnalyticsResource')]"
             ],
             "properties": {
-                "publicAccess": "Blob"
+                "description": "Certificate has been updated for WebApp",
+                "enabled": "true",
+                "source": { 
+                    "query": "[concat( 'AzureDiagnostics | where ResultDescription contains \"Set-AppServiceCertificate: new certificate has been installed for WebApp: ', parameters('logWebAppName'), '\"')]",
+                    "authorizedResources": [],
+                    "dataSourceId": "[variables('logAnalyticsResource')]",
+                    "queryType": "ResultCount"
+                },
+                "schedule": {
+                    "frequencyInMinutes": 180,
+                    "timeWindowInMinutes": 180
+                },
+                "action": {
+                    "severity": "3",
+                    "aznsAction": {
+                        "actionGroup": [
+                            "[variables('actionGroupResource')]"
+                        ]
+                    },
+                    "throttlingInMin": 50,
+                    "trigger": {
+                        "thresholdOperator": "GreaterThan",
+                        "threshold": 0
+                    },
+                    "odata.type": "Microsoft.WindowsAzure.Management.Monitoring.Alerts.Models.Microsoft.AppInsights.Nexus.DataContracts.Resources.ScheduledQueryRules.AlertingAction"
+                }
             }
         },
         {
-            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
-            "apiVersion": "2019-06-01",
-            "name": "[concat(parameters('storageAccountName'), '/default/le-state')]",
+            "type": "Microsoft.Insights/scheduledQueryRules",
+            "apiVersion": "2018-04-16",
+            "name": "[concat(parameters('projectAppName'),'-certificate-does-not-require-update')]",
+            "location": "[resourceGroup().location]",
             "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+                "[variables('actionGroupResource')]",
+                "[variables('logAnalyticsResource')]"
             ],
             "properties": {
-                "publicAccess": "None"
+                "description": "Certificate for WebApp doesn't requre updating!",
+                "enabled": "true",
+                "source": {
+                    "query": "[concat( 'AzureDiagnostics | where ResultDescription contains \"Update-ACMECertificate: certificate update is not needed for WebApp: ', parameters('logWebAppName'), '\"')]",
+                    "authorizedResources": [],
+                    "dataSourceId": "[variables('logAnalyticsResource')]",
+                    "queryType": "ResultCount"
+                },
+                "schedule": {
+                    "frequencyInMinutes": 15,
+                    "timeWindowInMinutes": 15
+                },
+                "action": {
+                    "severity": "3",
+                    "aznsAction": {
+                        "actionGroup": [
+                            "[variables('actionGroupResource')]"
+                        ]
+                    },
+                    "throttlingInMin": 50,
+                    "trigger": {
+                        "thresholdOperator": "GreaterThan",
+                        "threshold": 0
+                    },
+                    "odata.type": "Microsoft.WindowsAzure.Management.Monitoring.Alerts.Models.Microsoft.AppInsights.Nexus.DataContracts.Resources.ScheduledQueryRules.AlertingAction"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Insights/scheduledQueryRules",
+            "apiVersion": "2018-04-16",
+            "name": "[concat(parameters('projectAppName'),'-errors-in-the-certificate-updating')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('actionGroupResource')]",
+                "[variables('logAnalyticsResource')]"
+            ],
+            "properties": {
+                "description": "There are errors found during the certificate update for WebApp",
+                "enabled": "true",
+                "source": {
+                    "query": "AzureDiagnostics | where StreamType_s == \"Error\"",
+                    "authorizedResources": [],
+                    "dataSourceId": "[variables('logAnalyticsResource')]",
+                    "queryType": "ResultCount"
+                },
+                "schedule": {
+                    "frequencyInMinutes": 60,
+                    "timeWindowInMinutes": 60
+                },
+                "action": {
+                    "severity": "1",
+                    "aznsAction": {
+                        "actionGroup": [
+                            "[variables('actionGroupResource')]"
+                        ]
+                    },
+                    "throttlingInMin": 50,
+                    "trigger": {
+                        "thresholdOperator": "GreaterThan",
+                        "threshold": 0
+                    },
+                    "odata.type": "Microsoft.WindowsAzure.Management.Monitoring.Alerts.Models.Microsoft.AppInsights.Nexus.DataContracts.Resources.ScheduledQueryRules.AlertingAction"
+                }
             }
         }
 
