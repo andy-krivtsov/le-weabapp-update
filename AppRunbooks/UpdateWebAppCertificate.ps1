@@ -165,7 +165,7 @@ function Set-AppServiceCertificate
                     $logMsg = $logMsgBase + ", slot: $($slot.Name), binding: $($bind.Name)"
 
                     if(-not $IsDryRun){
-                        $slot | New-AzureRmWebAppSSLBinding -CertificateFilePath $cert.PfxFile -CertificatePassword $PfxPassword -Name $bind.Name -SslState $bind.SslState -Verbose | Out-Null
+                        $slot | New-AzureRmWebAppSSLBinding -CertificateFilePath $cert.PfxFile -CertificatePassword $PfxPassword -Name $bind.Name -SslState "SniEnabled" -Verbose | Out-Null
                         Write-VerboseLog $logMsg
                     }else{
                         Write-VerboseLog ($logMsg + "  (DRY RUN)")
