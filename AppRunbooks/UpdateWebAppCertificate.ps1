@@ -185,14 +185,17 @@ function Test-WebAppCertificate{
         $webApp = Get-AzureRmWebApp -ResourceGroupName $WebAppRG -Name $wname
 
         foreach($bind in ($webApp | Get-AzureRmWebAppSSLBinding) ){
-            $cert = Get-AzureRmWebAppCertificate -Thumbprint $bind.Thumbprint
-            
-            $remainingDays = ($cert.ExpirationDate - (Get-Date)).Days
+            if(($DomainNames -contains $bind.Name) -and ($bind.SslState -ne 'Disabled') ){
+                $certs = Get-AzureRmWebAppCertificate -Thumbprint $bind.Thumbprint -ResourceGroupName $WebAppRG
+                $cert = $certs | ?{ $_.Location -eq $webApp.Location }
+                
+                $remainingDays = ($cert.ExpirationDate - (Get-Date)).Days
 
-            if( $remainingDays -le $CertExpirationBoundary ){
-                Write-Warning "Test-WebAppCertificate: SSL certificate needs to be updated. WebApp: $($webApp.Name), expired in $remainingDays days!"
-            }else{
-                Write-VerboseLog "Test-WebAppCertificate: SSL certificate is OK! WebApp: $($webApp.Name), expiration date is $($cert.ExpirationDate)"
+                if( $remainingDays -le $CertExpirationBoundary ){
+                    Write-Warning "Test-WebAppCertificate: SSL certificate needs to be updated. WebApp: $($webApp.Name), expired in $remainingDays days!"
+                }else{
+                    Write-VerboseLog "Test-WebAppCertificate: SSL certificate is OK! WebApp: $($webApp.Name), expiration date is $($cert.ExpirationDate)"
+                }
             }
         }
     }
