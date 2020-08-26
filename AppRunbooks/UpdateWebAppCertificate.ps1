@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory=$false)]
     [ValidateSet('CertVerify', 'CertUpdate', 'CertInstall')]
-    [string] $ScriptAction = 'CertUpdate'
+    [string] $ScriptAction = 'CertVerify'
 )
 
 import-module Posh-ACME
@@ -53,13 +53,12 @@ function Set-ACMEStoredState
 function New-ACMECertificate
 {
     #Create new account and order for certificates
-    $account = New-PAAccount -AcceptTOS -Contact $DomainContact -Force
     $order = New-PAOrder $DomainNames
 
     Write-VerboseLog "New-ACMECertificate: Created new account and order for domains: $($DomainNames -join ',')"
 
     #Get status of authorizations
-    $order | Get-PAAuthorizations | %{
+    $order | Get-PAAuthorizations | ?{$_.HTTP01Status -ne "valid"} | %{
         $token = $_.HTTP01Token
 
         #generate verification data
@@ -76,6 +75,8 @@ function New-ACMECertificate
 
         Write-VerboseLog "New-ACMECertificate: Domain verification writed to storage: fqdn: $($_.fqdn), token: $token, storage: $StorageAccount\$TokenContainer"
     }   
+
+    Start-Sleep -Seconds 10
 
     #Wait for verification
     #TODO in case of "ivalid" status on any domain - stop waiting 
@@ -117,15 +118,10 @@ function Update-ACMECertificate
         Write-VerboseLog "Update-ACMECertificate: certificate update is not needed for WebApp: $($WebAppNames[0]) (recomended date $($order.RenewAfter))"
         return $false
     } 
-    
-    New-PAOrder $DomainNames -Force
-    $certData = New-PACertificate -Domain $DomainNames -PfxPass $PfxPassword -Force -ErrorAction Stop
 
-    if($null -eq $certData){
-        throw "Update-ACMECertificate: error in the certificate update!"
-    }
+    Write-VerboseLog "Update-ACMECertificate: start updating certificate for WebApp: $($WebAppNames[0])"
 
-    Write-VerboseLog "Update-ACMECertificate: New certificate received. Subject: $($certData.Subject), Thumbprint: $($certData.Thumbprint), SAN: $($certData.AllSANs -join ','), Expires: $($certData.NotAfter), File: $($certData.PfxFile)"
+    New-ACMECertificate
 
     return $true
 }
@@ -186,15 +182,17 @@ function Test-WebAppCertificate{
 
         foreach($bind in ($webApp | Get-AzureRmWebAppSSLBinding) ){
             if(($DomainNames -contains $bind.Name) -and ($bind.SslState -ne 'Disabled') ){
-                $certs = Get-AzureRmWebAppCertificate -Thumbprint $bind.Thumbprint -ResourceGroupName $WebAppRG
+                $certs = Get-AzureRmWebAppCertificate -Thumbprint $bind.Thumbprint
                 $cert = $certs | ?{ $_.Location -eq $webApp.Location }
                 
                 $remainingDays = ($cert.ExpirationDate - (Get-Date)).Days
 
                 if( $remainingDays -le $CertExpirationBoundary ){
-                    Write-Warning "Test-WebAppCertificate: SSL certificate needs to be updated. WebApp: $($webApp.Name), expired in $remainingDays days!"
+                    Write-Warning "Test-WebAppCertificate: SSL certificate needs to be updated. WebApp: $($webApp.Name), Binding: $($bind.Name), expired in $remainingDays days!"
+                }elseif ($remainingDays -le 0 ){
+                    Write-Error "Test-WebAppCertificate: SSL certificate expired! WebApp: $($webApp.Name), Binding: $($bind.Name)!"
                 }else{
-                    Write-VerboseLog "Test-WebAppCertificate: SSL certificate is OK! WebApp: $($webApp.Name), expiration date is $($cert.ExpirationDate)"
+                    Write-VerboseLog "Test-WebAppCertificate: SSL certificate is OK! WebApp: $($webApp.Name), Binding: $($bind.Name), expiration date is $($cert.ExpirationDate)"
                 }
             }
         }
@@ -329,6 +327,7 @@ $certInstall = $false
 
 #Create new account if account state was not loaded from storage
 if(-not $isStateLoaded){
+    New-PAAccount -AcceptTOS -Contact $DomainContact -Force
     New-ACMECertificate
     $certUpdate = $true
     $certInstall = $true
