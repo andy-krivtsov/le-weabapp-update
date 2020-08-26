@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory=$false)]
     [ValidateSet('CertVerify', 'CertUpdate', 'CertInstall')]
-    [string] $ScriptAction = 'CertVerify'
+    [string] $ScriptAction = 'CertUpdate'
 )
 
 import-module Posh-ACME
